@@ -1,0 +1,28 @@
+name: Release
+
+# 推一个全版本 tag(vX.Y.Z)时,把对应的大版本 tag(vX)滚动到它上面,
+# 让消费者可以稳定地 `uses: swarm-apps/swarmhive-action@v1`。
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  major-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Move the major version tag
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF_NAME}"   # vX.Y.Z
+          major="${ref%%.*}"          # vX
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$major" "$ref"
+          git push origin -f "refs/tags/$major"
+          echo "moved $major -> $ref"
