@@ -78,9 +78,10 @@ runs:
         [ -n "${{ inputs.version }}" ] && args+=(--version "${{ inputs.version }}")
         [ -n "${{ inputs.version-code }}" ] && args+=(--version-code "${{ inputs.version-code }}")
         [ -n "${{ inputs.abi }}" ] && args+=(--abi "${{ inputs.abi }}")
-        [ -n "${{ inputs.target }}" ] && args+=(--target "${{ inputs.target }}")
 
         if [ "$verb" = "publish" ]; then
+          # --target / --abi 仅 publish 子命令有；verify(dry-run) 无,放这里避免 verify 撞未知参数
+          [ -n "${{ inputs.target }}" ] && args+=(--target "${{ inputs.target }}")
           [ -n "${{ inputs.channel }}" ] && args+=(--channel "${{ inputs.channel }}")
           [ -n "${{ inputs.notes-file }}" ] && args+=(--notes-file "${{ inputs.notes-file }}")
           [ "${{ inputs.no-publish }}" = "true" ] && args+=(--no-publish)
