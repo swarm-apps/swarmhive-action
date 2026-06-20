@@ -33,6 +33,9 @@ inputs:
   abi:
     description: "Android target ABI (e.g. arm64-v8a)."
     required: false
+  target:
+    description: "Tauri target triple applied to all artifacts (e.g. universal-apple-darwin, x86_64-pc-windows-msvc). Required to publish multi-target Tauri builds correctly — without it the server cannot disambiguate per-arch/per-OS artifacts."
+    required: false
   notes-file:
     description: "Path to a release notes / changelog file injected into the release (publish only)."
     required: false
@@ -75,6 +78,7 @@ runs:
         [ -n "${{ inputs.version }}" ] && args+=(--version "${{ inputs.version }}")
         [ -n "${{ inputs.version-code }}" ] && args+=(--version-code "${{ inputs.version-code }}")
         [ -n "${{ inputs.abi }}" ] && args+=(--abi "${{ inputs.abi }}")
+        [ -n "${{ inputs.target }}" ] && args+=(--target "${{ inputs.target }}")
 
         if [ "$verb" = "publish" ]; then
           [ -n "${{ inputs.channel }}" ] && args+=(--channel "${{ inputs.channel }}")

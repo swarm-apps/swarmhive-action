@@ -66,6 +66,7 @@ Android 必须显式给 `version` 与 `version-code`。
 | `channel` | | 发布后 promote 到的渠道(如 `stable`)。 |
 | `artifacts` | | 换行分隔的产物路径(覆盖 `swarmhive.toml`)。 |
 | `abi` | | Android 目标 ABI(如 `arm64-v8a`)。 |
+| `target` | | Tauri target triple(如 `universal-apple-darwin`、`x86_64-pc-windows-msvc`)。**多 target Tauri 构建必填**——否则 server 无法区分各 arch/OS 产物(每个 target 各调一次 action)。 |
 | `notes-file` | | 注入 release 的 changelog / 发布说明文件(仅 publish)。 |
 | `no-publish` | | `true` 则只上传 + 写产物,release 留 draft。默认 `false`。 |
 | `dry-run` | | `true` 则只校验、不上传。默认 `false`。 |
