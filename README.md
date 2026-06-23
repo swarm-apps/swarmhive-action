@@ -18,12 +18,22 @@
     token: ${{ secrets.SWARMHIVE_TOKEN }}     # scoped API token
     platform: tauri
     app: swarmdrop
-    channel: beta
-    artifacts: src-tauri/target/release/bundle
+    target: aarch64-apple-darwin              # 本次产物的 target triple
+    channel: stable
+    # ⚠️ artifacts 必须是「具体文件」,不能传目录;每个 target 只传那一个签名 updater
+    #    bundle(.app.tar.gz / .nsis.zip / .AppImage.tar.gz)。同名 <file>.sig 会自动配对。
+    #    不要把 .dmg / .exe 安装包混进来——artifact 唯一键是 (release,platform,target,arch,abi),
+    #    同 target 多文件会互相覆盖。安装包留在 GitHub Release 即可。
+    artifacts: src-tauri/target/release/bundle/macos/swarmdrop.app.tar.gz
     notes-file: CHANGELOG.md
 ```
 
 `version` 省略时,Tauri 会自动从 `tauri.conf.json` 读取。
+
+**多 target 发布**:每个 target(`aarch64-apple-darwin`、`x86_64-apple-darwin`、
+`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu` …)各调一次本 action,`target`
+设成对应 triple、`artifacts` 给该 target 的 updater bundle。同 `version` 的多次发布
+会 append 进同一个 release;在最后一次(或每一次)带 `channel: stable` 把渠道指向它。
 
 ### React Native Android
 
