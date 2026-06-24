@@ -1,96 +1,177 @@
 name: "SwarmHive Publish"
-description: "Publish a Tauri desktop or React Native Android release to a SwarmHive server via @swarm-hive/cli."
+description: "Publish a Tauri desktop or React Native Android release to a SwarmHive server via @swarm-hive/cli (upload to draft + finalize)."
 author: "swarm-apps"
 branding:
   icon: "upload-cloud"
   color: "purple"
 
 inputs:
-  server:
-    description: "SwarmHive server URL (e.g. https://updates.example.com)."
-    required: true
   token:
-    description: "Scoped API token (SWARMHIVE_TOKEN). Store as a secret."
+    description: "Scoped API token (SWARMHIVE_TOKEN). Store as a secret. Create one with `swarmhive tokens create --kind api --preset ci-publish`."
     required: true
+  server:
+    description: "SwarmHive server URL (e.g. https://updates.example.com). Optional if `server` is set in swarmhive.toml."
+    required: false
   platform:
-    description: "Release platform: tauri or android."
-    required: true
+    description: "Release platform: tauri or android. Not needed for a finalize-only step."
+    required: false
+    default: "tauri"
   app:
     description: "App slug (overrides swarmhive.toml)."
     required: false
   version:
-    description: "Release version. Tauri auto-reads tauri.conf.json when omitted; Android requires it."
+    description: "Release version. Tauri auto-reads tauri.conf.json when omitted; Android requires it; finalize requires it."
     required: false
   version-code:
     description: "Android versionCode (required for android)."
-    required: false
-  channel:
-    description: "Channel to promote to the published release (e.g. stable)."
-    required: false
-  artifacts:
-    description: "Newline-separated artifact paths (overrides swarmhive.toml)."
     required: false
   abi:
     description: "Android target ABI (e.g. arm64-v8a)."
     required: false
   target:
-    description: "Tauri target triple applied to all artifacts (e.g. universal-apple-darwin, x86_64-pc-windows-msvc). Required to publish multi-target Tauri builds correctly — without it the server cannot disambiguate per-arch/per-OS artifacts."
+    description: "Tauri target triple for this build (e.g. x86_64-pc-windows-msvc). Required for multi-target Tauri so the server can disambiguate per-arch/per-OS artifacts (one action invocation per target)."
     required: false
-  notes-file:
-    description: "Path to a release notes / changelog file injected into the release (publish only)."
+  artifact-paths:
+    description: "Newline-separated globs/paths of build outputs. The action auto-selects the real updater bundle(s) (.app.tar.gz / .AppImage(.tar.gz) / .nsis.zip / -setup.exe) and excludes installers (.deb/.dmg/.msi/.rpm). Prefer this over `artifacts`."
     required: false
-  no-publish:
-    description: "Upload + write artifacts but leave the release in draft."
+  artifacts:
+    description: "Escape hatch: newline-separated EXACT artifact paths, passed through without filtering. Use `artifact-paths` instead unless you need to bypass selection."
+    required: false
+  channel:
+    description: "Channel to promote to the release (e.g. stable). Implies finalize."
+    required: false
+  finalize:
+    description: "Finalize (publish) the release. In an upload step this publishes after uploading; with no artifacts it runs a finalize-only step (the recommended last job after N per-target uploads)."
     required: false
     default: "false"
+  notes-file:
+    description: "Path to a release notes / changelog file injected into the release (upload step only)."
+    required: false
   dry-run:
-    description: "Verify only — do not upload."
+    description: "Verify only — do not upload or contact the server."
     required: false
     default: "false"
   cli-version:
-    description: "@swarm-hive/cli version to run (default: latest)."
+    description: "@swarm-hive/cli version to run. Pinned to a stable version by default (never `latest`, which can silently drift). Requires >= 0.5.0 for the draft + finalize flow."
     required: false
-    default: "latest"
+    default: "0.5.0"
+
+outputs:
+  updater:
+    description: "Newline-separated updater bundle(s) selected from artifact-paths."
+    value: ${{ steps.pick.outputs.updater }}
+  resolved-cli-version:
+    description: "The @swarm-hive/cli version that was run."
+    value: ${{ steps.cli.outputs.version }}
+  exit-code:
+    description: "CLI exit code on success (0). On failure the step fails; read the ::error::/::warning:: annotation."
+    value: ${{ steps.run.outputs.exit-code }}
 
 runs:
   using: "composite"
   steps:
-    - name: Run @swarm-hive/cli
+    - name: Resolve CLI version
+      id: cli
+      shell: bash
+      run: |
+        v="${{ inputs.cli-version }}"
+        echo "version=$v" >> "$GITHUB_OUTPUT"
+        echo "+ @swarm-hive/cli@$v"
+
+    - name: Select updater bundles
+      id: pick
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        ARTIFACT_PATHS: ${{ inputs.artifact-paths }}
+        ARTIFACTS: ${{ inputs.artifacts }}
+      run: node "$GITHUB_ACTION_PATH/scripts/pick-bundles.mjs"
+
+    - name: Publish / finalize
+      id: run
       shell: bash
       env:
         SWARMHIVE_SERVER: ${{ inputs.server }}
         SWARMHIVE_TOKEN: ${{ inputs.token }}
       run: |
-        set -euo pipefail
+        # 注意:**不** set -e —— 需要捕获 CLI 退出码(2=权限/配置永久错;1=可重试),
+        # 不能像旧版那样被 set -e / continue-on-error 吞掉权限错误。
+        set -uo pipefail
+
+        CLI="${{ steps.cli.outputs.version }}"
         platform="${{ inputs.platform }}"
-        if [ "$platform" != "tauri" ] && [ "$platform" != "android" ]; then
-          echo "::error::platform must be 'tauri' or 'android' (got '$platform')"
-          exit 1
-        fi
+        finalize="${{ inputs.finalize }}"
+        dry="${{ inputs.dry-run }}"
 
-        verb="publish"
-        if [ "${{ inputs.dry-run }}" = "true" ]; then
-          verb="verify"
-        fi
+        # 选中的 updater bundle(picker 写进 output)。
+        artifacts=()
+        while IFS= read -r f; do
+          [ -n "$f" ] && artifacts+=("$f")
+        done <<< "${{ steps.pick.outputs.updater }}"
 
-        args=()
-        [ -n "${{ inputs.app }}" ] && args+=(--app "${{ inputs.app }}")
-        [ -n "${{ inputs.version }}" ] && args+=(--version "${{ inputs.version }}")
-        [ -n "${{ inputs.version-code }}" ] && args+=(--version-code "${{ inputs.version-code }}")
-        [ -n "${{ inputs.abi }}" ] && args+=(--abi "${{ inputs.abi }}")
+        common=()
+        [ -n "${{ inputs.app }}" ] && common+=(--app "${{ inputs.app }}")
+        [ -n "${{ inputs.version }}" ] && common+=(--version "${{ inputs.version }}")
 
-        if [ "$verb" = "publish" ]; then
-          # --target / --abi 仅 publish 子命令有；verify(dry-run) 无,放这里避免 verify 撞未知参数
-          [ -n "${{ inputs.target }}" ] && args+=(--target "${{ inputs.target }}")
-          [ -n "${{ inputs.channel }}" ] && args+=(--channel "${{ inputs.channel }}")
+        run_cli() {
+          echo "+ npx @swarm-hive/cli@$CLI $*"
+          npx --yes "@swarm-hive/cli@$CLI" "$@"
+        }
+
+        need_platform() {
+          if [ "$platform" != "tauri" ] && [ "$platform" != "android" ]; then
+            echo "::error::platform must be 'tauri' or 'android' (got '$platform')"
+            exit 2
+          fi
+        }
+
+        code=0
+        if [ "$dry" = "true" ]; then
+          # verify:flag 集与 publish 不同 —— verify tauri 用 --artifact(无 --target);
+          # verify android 用 --apk + 必填 --version-code(无 --abi/--artifact)。
+          need_platform
+          if [ "$platform" = "tauri" ]; then
+            args=(verify tauri "${common[@]}")
+            for a in "${artifacts[@]:-}"; do [ -n "$a" ] && args+=(--artifact "$a"); done
+          else
+            args=(verify android "${common[@]}")
+            [ -n "${{ inputs.version-code }}" ] && args+=(--version-code "${{ inputs.version-code }}")
+            [ "${#artifacts[@]}" -gt 0 ] && args+=(--apk "${artifacts[0]}")
+          fi
+          run_cli "${args[@]}"; code=$?
+        elif [ "$finalize" = "true" ] && [ ${#artifacts[@]} -eq 0 ]; then
+          # finalize-only(无产物):N 个 per-target 上传后的收尾。
+          run_cli releases finalize "${common[@]}"; code=$?
+          if [ $code -eq 0 ] && [ -n "${{ inputs.channel }}" ]; then
+            run_cli channels promote \
+              --app "${{ inputs.app }}" \
+              --name "${{ inputs.channel }}" \
+              --version "${{ inputs.version }}"; code=$?
+          fi
+        else
+          # 上传:默认到 draft;finalize=true / channel 时一步发布(+ promote)。
+          need_platform
+          if [ ${#artifacts[@]} -eq 0 ]; then
+            echo "::error::no updater bundles selected — check 'artifact-paths' (or pass 'artifacts')"
+            exit 2
+          fi
+          args=(publish "$platform" "${common[@]}")
+          # 按平台 gate flag:publish tauri 收 --target(无 --version-code/--abi);
+          # publish android 收 --version-code/--abi(无 --target)。
+          if [ "$platform" = "tauri" ]; then
+            [ -n "${{ inputs.target }}" ] && args+=(--target "${{ inputs.target }}")
+          else
+            [ -n "${{ inputs.version-code }}" ] && args+=(--version-code "${{ inputs.version-code }}")
+            [ -n "${{ inputs.abi }}" ] && args+=(--abi "${{ inputs.abi }}")
+          fi
           [ -n "${{ inputs.notes-file }}" ] && args+=(--notes-file "${{ inputs.notes-file }}")
-          [ "${{ inputs.no-publish }}" = "true" ] && args+=(--no-publish)
+          [ "$finalize" = "true" ] && args+=(--finalize)
+          [ -n "${{ inputs.channel }}" ] && args+=(--channel "${{ inputs.channel }}")
+          for a in "${artifacts[@]}"; do args+=(--artifact "$a"); done
+          run_cli "${args[@]}"; code=$?
         fi
 
-        # Newline-separated artifact list → repeated --artifact flags.
-        while IFS= read -r line; do
-          [ -n "$line" ] && args+=(--artifact "$line")
-        done <<< "${{ inputs.artifacts }}"
-
-        echo "+ npx @swarm-hive/cli@${{ inputs.cli-version }} $verb $platform ${args[*]}"
-        npx --yes "@swarm-hive/cli@${{ inputs.cli-version }}" "$verb" "$platform" "${args[@]}"
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        # 退出码红绿:任何非零都让 step 标红(终结旧 continue-on-error 吞错)。CLI 已按
+        # exit 2(永久,::error::)/ exit 1(可重试,::warning::)发好 annotation。
+        exit $code
