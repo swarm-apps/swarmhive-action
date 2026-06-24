@@ -126,7 +126,7 @@ Android 必须显式给 `version` 与 `version-code`。单一 APK,一步上传 +
 | `finalize` | | `true` 则发布(上传 step 内一步发布;无产物则 finalize-only step)。默认 `false`。 |
 | `notes-file` | | 注入 release 的 changelog 文件(仅上传 step)。 |
 | `dry-run` | | `true` 则只校验、不上传。默认 `false`。 |
-| `cli-version` | | 运行的 `@swarm-hive/cli` 版本。默认钉稳定版(不用 `latest`)。需 ≥ 0.5.0。 |
+| `cli-version` | | 运行的 `@swarm-hive/cli` 版本。默认钉稳定版(不用 `latest`)。需 ≥ 0.6.0。 |
 
 ## Outputs
 
@@ -160,7 +160,7 @@ gh secret set SWARMHIVE_SERVER --body https://updates.example.com
 | action | `@swarm-hive/cli` | 发布语义 |
 | --- | --- | --- |
 | `@v1` | `0.4.x` | `publish` 默认发布;手写 bundle 选取;`continue-on-error` 吞错。 |
-| `@v2` | `>= 0.5.0` | `publish` 默认 draft + `finalize`;内置 artifact 选取;退出码红绿。 |
+| `@v2` | `>= 0.6.0` | `publish` 默认 draft + `finalize`;内置 artifact 选取;退出码红绿。 |
 
 `@v2` 需要支持 `artifact.kind` 的 `@swarm-hive/cli` 与 server;否则同 target 下同时上传安装包和
 updater bundle 会退化成旧唯一键语义。`@v1` 与新 CLI 不兼容(CLI 已移除 `--no-publish`、默认改
@@ -175,11 +175,11 @@ draft)——升级 action 与 CLI 要成对做。
 4. 多 target:每个 target 上传到 draft(不加 finalize)→ 末步加一个 `finalize: "true"` 的 job
    (或单 target 直接在上传 step 加 `finalize: "true"`)。
 5. 移除 `no-publish` input(已删;默认即 draft)。
-6. `cli-version` 若钉了 `0.4.x` → 升到 `0.5.0`(或留空用默认)。
+6. `cli-version` 若钉了 `0.4.x` / `0.5.x` → 升到 `0.6.0`(或留空用默认)。
 
 ## 版本
 
-`@v2` 是会随 `v2.x.y` 滚动的大版本 tag;要钉死就用 `@v2.0.0` 这种全版本 tag。推 `v2.0.0` tag
+`@v2` 是会随 `v2.x.y` 滚动的大版本 tag;要钉死就用 `@v2.1.0` 这种全版本 tag。推 `v2.1.0` tag
 时 `.github/workflows/release.yml` 会自动把 `v2` major tag 指过去。
 
 ## License

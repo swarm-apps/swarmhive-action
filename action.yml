@@ -54,7 +54,7 @@ inputs:
   cli-version:
     description: "@swarm-hive/cli version to run. Pinned to a stable version by default (never `latest`, which can silently drift). Requires a CLI/server pair that supports draft + finalize and artifact.kind."
     required: false
-    default: "0.5.0"
+    default: "0.6.0"
 
 outputs:
   artifacts:
