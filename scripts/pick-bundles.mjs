@@ -1,31 +1,39 @@
-// 从 `artifact-paths`(换行分隔的 glob / 精确路径)里**可靠选取**真正的 Tauri updater
-// bundle,写进 GITHUB_OUTPUT 的 `updater`(多行)供 action 逐个传 `--artifact`。
+// 从 `artifact-paths`(换行分隔的 glob / 精确路径)里**可靠选取**可发布产物:
+// Tauri installer + updater bundle + universal artifact;Android APK。
+// 写进 GITHUB_OUTPUT 的 `artifacts`(多行)供 action 逐个传 `--artifact`。
 //
 // 为什么用 node 而非 bash(见 harden-publish-flow design D7):
 //   - 不依赖 shell `test -f` —— windows runner 上 `D:/` 盘符 + bash 的路径判断不可靠;
 //     node 的 fs 跨平台正确处理盘符与分隔符。
-//   - 白名单只保留真 updater bundle,**显式排除安装包**,避免 `.deb`/`.dmg` 等被误当产物
-//     (artifact 唯一键是 (release,platform,target,arch,abi),同 target 多文件会互相覆盖)。
+//   - 白名单只保留 SwarmHive 能分类的发布产物,排除 `.sig` 等伴随文件。server/CLI 通过
+//     `artifact.kind` 区分 installer/updater/universal,同 target 下多文件不再互相覆盖。
 //
 // glob 自己实现(支持 `**` / `*` / `?`)—— 不引依赖,且 node 20 没有稳定的 fs.globSync。
 
 import { readdirSync, existsSync, appendFileSync } from "node:fs";
 import { join, sep } from "node:path";
 
-// platform 决定白名单:tauri 是各 OS 的 updater bundle;android 就是 APK。
+// platform 决定白名单:tauri 是 installer/updater/universal;android 就是 APK。
 const PLATFORM = (process.env.PLATFORM || "tauri").toLowerCase();
 
-// Tauri updater bundle 白名单后缀(真正能被客户端 updater 拉取/安装的产物)。
+// Tauri 发布产物白名单后缀:
+// - installer:公开下载/首次安装。
+// - updater:应用内更新。
+// - universal:可同时服务公开下载与更新。
 const TAURI_INCLUDE = [
   ".app.tar.gz",
+  ".dmg",
   ".appimage.tar.gz",
   ".appimage",
+  ".deb",
+  ".rpm",
   ".nsis.zip",
+  ".msi.zip",
+  ".msi",
   "-setup.exe",
+  ".exe",
 ];
 const INCLUDE = PLATFORM === "android" ? [".apk"] : TAURI_INCLUDE;
-// 安装包后缀:显式排除 —— 不是 updater bundle,留在 GitHub Release 即可(仅 tauri 相关)。
-const EXCLUDE = [".deb", ".dmg", ".msi", ".rpm"];
 
 const splitLines = (s) =>
   (s || "")
@@ -33,11 +41,10 @@ const splitLines = (s) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
-/** 路径是否是 updater bundle(过 .sig、过安装包、命中白名单)。大小写不敏感。 */
-function isBundle(p) {
+/** 路径是否是可发布 artifact(过 .sig、命中白名单)。大小写不敏感。 */
+function isArtifact(p) {
   const low = p.toLowerCase();
   if (low.endsWith(".sig")) return false; // .sig 由 CLI 自动配对,不作为 artifact
-  if (EXCLUDE.some((e) => low.endsWith(e))) return false;
   return INCLUDE.some((e) => low.endsWith(e));
 }
 
@@ -111,33 +118,25 @@ if (explicit.length) {
 } else {
   const set = new Set();
   for (const g of globs) for (const f of expand(g)) set.add(f);
-  selected = [...set].filter(isBundle);
-  // 同 target 唯一键 (release,platform,target,arch,abi) —— 一个 target 只应留一个 updater
-  // bundle,否则后传的覆盖先传的。action 按 target 调用,单次只含一个 OS 的产物,故下面的
-  // 全局「优先级」判定安全:
-  //   - windows:`-setup.exe` 优先于 `.nsis.zip`(二者都是 NSIS 的 updater 形态)。
-  //   - linux:`.AppImage.tar.gz`(updater bundle)优先于裸 `.AppImage`(可执行体)。
-  const lower = (f) => f.toLowerCase();
-  if (selected.some((f) => lower(f).endsWith("-setup.exe"))) {
-    selected = selected.filter((f) => !lower(f).endsWith(".nsis.zip"));
-  }
-  if (selected.some((f) => lower(f).endsWith(".appimage.tar.gz"))) {
-    selected = selected.filter((f) => !lower(f).endsWith(".appimage"));
-  }
+  selected = [...set].filter(isArtifact);
 }
 
 selected.sort();
 if (selected.length) {
-  console.log("selected updater bundle(s):");
+  console.log("selected release artifact(s):");
   for (const f of selected) console.log(`  ✓ ${f}`);
 } else {
-  console.log("no updater bundles selected from artifact-paths / artifacts");
+  console.log("no release artifacts selected from artifact-paths / artifacts");
 }
 
 const out = process.env.GITHUB_OUTPUT;
 if (out) {
   appendFileSync(
     out,
-    `updater<<__SWARMHIVE_EOF__\n${selected.join("\n")}\n__SWARMHIVE_EOF__\n`,
+    [
+      `artifacts<<__SWARMHIVE_EOF__\n${selected.join("\n")}\n__SWARMHIVE_EOF__\n`,
+      // Deprecated compatibility alias. It now mirrors the full artifact set.
+      `updater<<__SWARMHIVE_EOF__\n${selected.join("\n")}\n__SWARMHIVE_EOF__\n`,
+    ].join(""),
   );
 }

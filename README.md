@@ -9,10 +9,10 @@
 
 **v2 做了什么(对比 v1):**
 
-- **内置 updater bundle 选取** —— 你只给 `artifact-paths`(glob 即可),action 用 node 跨平台
-  可靠挑出真正的 updater bundle(`.app.tar.gz` / `.AppImage(.tar.gz)` / `.nsis.zip` /
-  `-setup.exe`),**显式排除安装包**(`.deb`/`.dmg`/`.msi`/`.rpm`),windows 优先 `-setup.exe`。
-  不再需要在 workflow 里手写 `test -f` 选取脚本(windows `D:/` 盘符下不可靠)。
+- **内置 release artifact 选取** —— 你只给 `artifact-paths`(glob 即可),action 用 node 跨平台
+  可靠挑出 Tauri 安装包、updater bundle、universal artifact,或 Android APK。SwarmHive 通过
+  `artifact.kind` 区分 `installer` / `updater` / `universal`,同一 target 下安装包和升级包可以共存,
+  同一个 release 同时服务官网公开下载和应用内更新。
 - **上传与发布解耦** —— `publish` 默认只上传到 **draft**;`finalize: true` 才发布。多 target
   推荐「N 个 per-target 上传 → 末步一次 finalize」,杜绝并发抢发布丢 artifact。
 - **退出码红绿** —— CLI 永久错误(权限/配置)`exit 2` + `::error::`,可重试(5xx/网络)`exit 1`
@@ -48,7 +48,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      # ... 你的 Tauri 构建步骤(tauri-apps/tauri-action 等),产出 updater bundle ...
+      # ... 你的 Tauri 构建步骤(tauri-apps/tauri-action 等),产出安装包 + updater bundle ...
       - uses: swarm-apps/swarmhive-action@v2
         with:
           server: ${{ secrets.SWARMHIVE_SERVER }}
@@ -57,7 +57,7 @@ jobs:
           app: swarmdrop
           version: ${{ needs.version.outputs.version }}
           target: ${{ matrix.target }}
-          # 给 glob 即可;action 自动挑真正的 updater bundle、排除安装包:
+          # 给 glob 即可;action 自动保留 installer / updater / universal:
           artifact-paths: |
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*
 
@@ -120,7 +120,7 @@ Android 必须显式给 `version` 与 `version-code`。单一 APK,一步上传 +
 | `version-code` | | Android `versionCode`(Android 必填)。 |
 | `abi` | | Android 目标 ABI(如 `arm64-v8a`)。 |
 | `target` | | Tauri target triple;**多 target 必填**(每个 target 各调一次 action)。 |
-| `artifact-paths` | | 换行分隔的 glob / 路径;action 自动挑 updater bundle、排除安装包。**首选**。 |
+| `artifact-paths` | | 换行分隔的 glob / 路径;action 自动挑 SwarmHive release artifacts。**首选**。 |
 | `artifacts` | | escape hatch:换行分隔的**精确**路径,原样透传不过滤。 |
 | `channel` | | 发布后 promote 到的渠道(如 `stable`)。隐含 finalize。 |
 | `finalize` | | `true` 则发布(上传 step 内一步发布;无产物则 finalize-only step)。默认 `false`。 |
@@ -132,7 +132,8 @@ Android 必须显式给 `version` 与 `version-code`。单一 APK,一步上传 +
 
 | 名称 | 说明 |
 | --- | --- |
-| `updater` | 从 `artifact-paths` 选中的 updater bundle(换行分隔)。 |
+| `artifacts` | 从 `artifact-paths` 选中的 release artifacts(换行分隔)。 |
+| `updater` | 兼容旧 workflow 的别名,内容等同 `artifacts`。 |
 | `resolved-cli-version` | 实际运行的 `@swarm-hive/cli` 版本。 |
 | `exit-code` | 成功时为 `0`;失败时 step 直接标红(看 `::error::` / `::warning::` annotation)。 |
 
@@ -159,15 +160,17 @@ gh secret set SWARMHIVE_SERVER --body https://updates.example.com
 | action | `@swarm-hive/cli` | 发布语义 |
 | --- | --- | --- |
 | `@v1` | `0.4.x` | `publish` 默认发布;手写 bundle 选取;`continue-on-error` 吞错。 |
-| `@v2` | `>= 0.5.0` | `publish` 默认 draft + `finalize`;内置 bundle 选取;退出码红绿。 |
+| `@v2` | `>= 0.5.0` | `publish` 默认 draft + `finalize`;内置 artifact 选取;退出码红绿。 |
 
-`@v2` 需要 `@swarm-hive/cli >= 0.5.0`(draft + finalize 流程)。`@v1` 与新 CLI 不兼容(CLI 已移除
-`--no-publish`、默认改 draft)——升级 action 与 CLI 要成对做。
+`@v2` 需要支持 `artifact.kind` 的 `@swarm-hive/cli` 与 server;否则同 target 下同时上传安装包和
+updater bundle 会退化成旧唯一键语义。`@v1` 与新 CLI 不兼容(CLI 已移除 `--no-publish`、默认改
+draft)——升级 action 与 CLI 要成对做。
 
 ## 从 v1 迁移到 v2(破坏性变更)
 
 1. `uses: swarm-apps/swarmhive-action@v1` → `@v2`。
-2. 删掉 workflow 里手写的「挑 updater bundle」bash;改用 `artifact-paths`(给 glob)。
+2. 删掉 workflow 里手写的「挑 updater bundle」bash;改用 `artifact-paths`(给 glob),让 action
+   同时保留安装包和升级包。
 3. 删掉 publish step 上的 `continue-on-error: true`(现在退出码红绿可信;权限错不再被吞)。
 4. 多 target:每个 target 上传到 draft(不加 finalize)→ 末步加一个 `finalize: "true"` 的 job
    (或单 target 直接在上传 step 加 `finalize: "true"`)。
