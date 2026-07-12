@@ -93,9 +93,14 @@ jobs:
     artifact-paths: android/app/build/outputs/apk/release/*.apk
     finalize: "true"
     channel: stable
+    # 可选:把同一批产物在 GitHub Release 上的资产 URL 记为镜像 / 备用下载源。
+    github-mirror-url: https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/${{ steps.meta.outputs.apk_asset }}
 ```
 
 Android 必须显式给 `version` 与 `version-code`。单一 APK,一步上传 + finalize 即可。
+`github-mirror-url` 可选:若你在同一 run 里也把该产物发到 GitHub Release,把它的下载 URL
+传进来,SwarmHive 会将其记为该 artifact 的镜像 / fallback 源(见服务端 `add-github-release-source`)。
+仅对单产物 publish 有意义,需 `cli-version >= 0.7.0`。
 
 ### 只校验不上传(dry-run)
 
@@ -126,7 +131,8 @@ Android 必须显式给 `version` 与 `version-code`。单一 APK,一步上传 +
 | `finalize` | | `true` 则发布(上传 step 内一步发布;无产物则 finalize-only step)。默认 `false`。 |
 | `notes-file` | | 注入 release 的 changelog 文件(仅上传 step)。 |
 | `dry-run` | | `true` 则只校验、不上传。默认 `false`。 |
-| `cli-version` | | 运行的 `@swarm-hive/cli` 版本。默认钉稳定版(不用 `latest`)。需 ≥ 0.6.0。 |
+| `github-mirror-url` | | 可选:该产物在 GitHub Release 上的资产 URL,记为镜像 / fallback 下载源。仅单产物 publish 有意义;需 `cli-version >= 0.7.0`。 |
+| `cli-version` | | 运行的 `@swarm-hive/cli` 版本。默认钉稳定版(不用 `latest`)。需 ≥ 0.6.0(`github-mirror-url` 需 ≥ 0.7.0)。 |
 
 ## Outputs
 
