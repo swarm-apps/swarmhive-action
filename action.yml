@@ -28,6 +28,9 @@ inputs:
   abi:
     description: "Android target ABI (e.g. arm64-v8a)."
     required: false
+  github-mirror-url:
+    description: "Optional GitHub Release asset URL to record as a mirror / fallback download source for this artifact (e.g. the same asset you upload to a GitHub Release in this run). Forwarded to the CLI's --mirror-url. Applies to a SINGLE-artifact publish only (one APK / one Tauri target per invocation). Requires cli-version >= 0.7.0."
+    required: false
   target:
     description: "Tauri target triple for this build (e.g. x86_64-pc-windows-msvc). Required for multi-target Tauri so the server can disambiguate per-arch/per-OS artifacts (one action invocation per target)."
     required: false
@@ -52,9 +55,9 @@ inputs:
     required: false
     default: "false"
   cli-version:
-    description: "@swarm-hive/cli version to run. Pinned to a stable version by default (never `latest`, which can silently drift). Requires a CLI/server pair that supports draft + finalize and artifact.kind."
+    description: "@swarm-hive/cli version to run. Pinned to a stable version by default (never `latest`, which can silently drift). Requires a CLI/server pair that supports draft + finalize and artifact.kind. `github-mirror-url` additionally needs >= 0.7.0."
     required: false
-    default: "0.6.0"
+    default: "0.7.0"
 
 outputs:
   artifacts:
@@ -168,6 +171,8 @@ runs:
             [ -n "${{ inputs.abi }}" ] && args+=(--abi "${{ inputs.abi }}")
           fi
           [ -n "${{ inputs.notes-file }}" ] && args+=(--notes-file "${{ inputs.notes-file }}")
+          # 记录 GitHub Release 镜像/备用源 URL(仅单产物 publish 有意义;CLI ≥ 0.7.0)。
+          [ -n "${{ inputs.github-mirror-url }}" ] && args+=(--mirror-url "${{ inputs.github-mirror-url }}")
           [ "$finalize" = "true" ] && args+=(--finalize)
           [ -n "${{ inputs.channel }}" ] && args+=(--channel "${{ inputs.channel }}")
           for a in "${artifacts[@]}"; do args+=(--artifact "$a"); done
